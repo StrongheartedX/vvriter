@@ -1,6 +1,6 @@
 {
   "name": "vvriter",
-  "version": "0.3.6",
+  "version": "0.4.0",
   "description": "Content creation engine for Visualize Value — generates articles, drafts tweets, and creates visual concepts from Jack Butcher's archive",
   "type": "module",
   "main": "dist/server.js",

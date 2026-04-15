@@ -103,7 +103,6 @@ Flow: vvriter() → user picks a number → vvriter(title, angle, ids) → open 
     async ({ topic, title, angle, tweet_ids, visual_ids }) => {
       const allTweets = loadTweets()
       const allVisuals = loadVisuals()
-      const profile = readFileSync(join(dataDir, 'writing-profile.md'), 'utf-8')
       const descriptions = loadDescriptions()
 
       // ── MODE 2: GENERATE ──────────────────────────────────────
@@ -140,11 +139,14 @@ Flow: vvriter() → user picks a number → vvriter(title, angle, ids) → open 
         const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '')
         const filepath = join(outDir, `${slug}.html`)
 
+        // Condensed voice guide for generate mode (full profile is 18KB - too big)
+        const voiceGuide = `Direct. Declarative. No hedging. Short paragraphs (1-3 sentences). Opens with the idea, not preamble. Ends sharp, no summary. "Use" not "utilize." No em dashes, no jargon, no transition words. Talks to "you" not "I." Land on nouns. Drop unnecessary periods.`
+
         const parts = [
           `# Write: "${title}"`,
           '',
-          `## Voice (match exactly)`,
-          profile,
+          `## Voice`,
+          voiceGuide,
           '',
           `**Title:** ${title}`,
           `**Angle:** ${angle}`,
@@ -209,13 +211,14 @@ Flow: vvriter() → user picks a number → vvriter(title, angle, ids) → open 
       // ── MODE 1: SUGGEST ───────────────────────────────────────
       const seen = new Set<string>()
 
-      const tier1 = allTweets.slice(0, 50)
+      // Reduced sample sizes to stay within limits
+      const tier1 = allTweets.slice(0, 15)
       tier1.forEach((t) => seen.add(t.id))
 
-      const tier2 = shuffleSample(allTweets.slice(50, 500), 75)
+      const tier2 = shuffleSample(allTweets.slice(15, 300), 25)
       tier2.forEach((t) => seen.add(t.id))
 
-      const tier3 = shuffleSample(allTweets.slice(500, 2000), 50)
+      const tier3 = shuffleSample(allTweets.slice(300, 1500), 15)
       tier3.forEach((t) => seen.add(t.id))
 
       const candidateTweets = [...tier1, ...tier2, ...tier3]
@@ -228,7 +231,7 @@ Flow: vvriter() → user picks a number → vvriter(title, angle, ids) → open 
             const lower = t.text.toLowerCase()
             return terms.some((term) => lower.includes(term))
           })
-          .slice(0, 75)
+          .slice(0, 20)
         topicMatches.forEach((t) => {
           seen.add(t.id)
           candidateTweets.push(t)
@@ -236,13 +239,13 @@ Flow: vvriter() → user picks a number → vvriter(title, angle, ids) → open 
       }
 
       const tweetList = candidateTweets
-        .map((t, i) => `[T${i}] "${t.text}" — ${t.likes} likes (id:${t.id})`)
+        .map((t, i) => `T${i}|${t.id}|${t.likes}|${t.text}`)
         .join('\n')
 
       const visualsWithText = allVisuals.filter((v) => v.data.text)
-      const sampledVisuals = shuffleSample(visualsWithText, Math.min(150, visualsWithText.length))
+      const sampledVisuals = shuffleSample(visualsWithText, Math.min(30, visualsWithText.length))
       const visualList = sampledVisuals
-        .map((v, i) => `[V${i}] "${v.data.text}" (id:${v.id})`)
+        .map((v, i) => `V${i}|${v.id}|${v.data.text}`)
         .join('\n')
 
       const voiceSummary = [
@@ -258,16 +261,16 @@ Flow: vvriter() → user picks a number → vvriter(title, angle, ids) → open 
         `**Never:** Self-reference, diary, engagement farming, performed vulnerability, cliches, hedging, em dashes, jargon, news, pop culture. The voice reads as observations about reality, not opinions from a personality.`,
       ].join('\n')
 
-      const parts = [
+      const MAX_CHARS = 25_000 // Claude Code truncates at 30k chars
+
+      const header = [
         `# Raw Material`,
         '',
         voiceSummary,
         '',
-        `## Tweets — ${candidateTweets.length} samples`,
-        tweetList,
-        '',
-        `## Visuals — ${sampledVisuals.length} illustrations`,
-        visualList,
+      ].join('\n')
+
+      const footer = [
         '',
         `## Create`,
         `Find the stories hiding in here. Connect tweets that share an underlying principle. Match with visuals whose captions reinforce the argument.`,
@@ -283,6 +286,30 @@ Flow: vvriter() → user picks a number → vvriter(title, angle, ids) → open 
         `Keep it scannable. Don't dump tweet lists.`,
         ``,
         `Track the tweet IDs and visual IDs for each option internally. When the user picks a number, immediately call vvriter again with title, angle, tweet_ids, and visual_ids. Then write the HTML file and open it. The whole flow: pick a number → article appears in browser.`,
+      ].join('\n')
+
+      const overhead = header.length + footer.length + 200
+      const budgetForData = MAX_CHARS - overhead
+
+      // Trim tweets/visuals to fit budget
+      let tLines = tweetList.split('\n')
+      let vLines = visualList.split('\n')
+      while ((tLines.join('\n').length + vLines.join('\n').length) > budgetForData && (tLines.length + vLines.length) > 10) {
+        if (tLines.length > vLines.length * 1.5) {
+          tLines.pop()
+        } else {
+          vLines.pop()
+        }
+      }
+
+      const parts = [
+        header,
+        `## Tweets — ${tLines.length} samples`,
+        tLines.join('\n'),
+        '',
+        `## Visuals — ${vLines.length} illustrations`,
+        vLines.join('\n'),
+        footer,
       ].join('\n')
 
       return { content: [{ type: 'text' as const, text: parts }] }
